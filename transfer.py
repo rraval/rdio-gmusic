@@ -1,3 +1,5 @@
+from __future__ import unicode_literals
+
 # FIXME: monkey patch the track adder to not throw an exception on missing keys
 # to test, try adding Tp3e52picsj55ozzmjtxwb5xpwa
 
@@ -39,13 +41,17 @@ import os
 import urllib
 from collections import defaultdict
 
+import click
 import oauth2
-from click import progressbar, echo_via_pager
 
 from gmusicapi.clients import Mobileclient
 
 # number of tracks to request from rdio at a time
 RDIO_CHUNK_SIZE = 250
+
+# oauth client identification
+RDIO_KEY = '3nq3y49bhhbwexffd5fym3mz'
+RDIO_SECRET = 'PdVBSRsXQv'
 
 class Rdio(object):
     def __init__(self, key, secret):
@@ -149,13 +155,26 @@ class ChangeTracker(object):
 
         return lines
 
-if __name__ == '__main__':
-    rdio = Rdio(os.getenv('RDIO_KEY'), os.getenv('RDIO_SECRET'))
-    rdio_user = 'rraval'
-    gmusic = GMusic(os.getenv('GOOGLE_USER'), os.getenv('GOOGLE_PASSWORD'))
+@click.command()
+@click.argument('rdio_user')
+@click.argument('google_user')
+def main(rdio_user, google_user):
+    click.echo('Create an App Specific Password to use with your Google Account')
+    click.echo('See https://support.google.com/accounts/answer/185833')
+
+    click.echo()
+    google_password = click.prompt('{} Password'.format(google_user), hide_input=True)
+    click.echo()
+
+    rdio = Rdio(RDIO_KEY, RDIO_SECRET)
+    gmusic = GMusic(google_user, google_password)
 
     existing_tracks = {}
-    with progressbar(gmusic.genTracks(), label='Existing Google Music', show_pos=True) as bar:
+    with click.progressbar(
+        gmusic.genTracks(),
+        label='Existing Google Music',
+        show_pos=True
+    ) as bar:
         for track in bar:
             if 'nid' in track:
                 existing_tracks[track['nid']] = track
@@ -164,7 +183,11 @@ if __name__ == '__main__':
     added = ChangeTracker('Added')
     notfound = ChangeTracker('Not Found')
 
-    with progressbar(rdio.genTracks(rdio_user), label='Rdio -> Google Music', show_pos=True) as bar:
+    with click.progressbar(
+        rdio.genTracks(rdio_user),
+        label='Rdio -> Google Music',
+        show_pos=True
+    ) as bar:
         for track in bar:
             match = gmusic.findTrack(track)
             if match is None:
@@ -176,8 +199,11 @@ if __name__ == '__main__':
                 added.add(track, match)
 
     total = sum((added.item_count, skip.item_count, notfound.item_count))
-    echo_via_pager('\n'.join(itertools.chain(
+    click.echo_via_pager('\n'.join(itertools.chain(
         added.summary(total),
         notfound.summary(total),
         skip.summary(total),
     )))
+
+if __name__ == '__main__':
+    main()
