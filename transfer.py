@@ -33,17 +33,16 @@ def build_track_add(store_track_info):
 gmusicapi.protocol.mobileclient.BatchMutateTracks.build_track_add = build_track_add
 
 # non fugly code starts here
+import itertools
+import json
 import os
 import urllib
-import json
+from collections import defaultdict
 
 import oauth2
-from click import progressbar
+from click import progressbar, echo_via_pager
 
 from gmusicapi.clients import Mobileclient
-
-# minimum `navigational_confidence` to consider a song to be a match
-CONFIDENCE_THRESHOLD = 5
 
 # number of tracks to request from rdio at a time
 RDIO_CHUNK_SIZE = 250
@@ -95,51 +94,90 @@ class GMusic(object):
             for track in chunk:
                 yield track
 
-    def findTrack(self, rdio_track):
-        results = self.client.search_all_access(' '.join((
-            rdio_track['artist'],
-            rdio_track['album'],
-            rdio_track['name'],
-        )))['song_hits']
+    def findTrack(self, rdio_track, keys=('artist', 'album', 'name',)):
+        if not keys:
+            return
 
+        results = self.client.search_all_access(' '.join(rdio_track[k] for k in keys))['song_hits']
         if not results:
-            return None
+            return self.findTrack(rdio_track, keys[1:])
 
         # FIXME: is the best match always first?
         best_match = results[0]
-
-        if best_match.get('navigational_confidence', 0) > CONFIDENCE_THRESHOLD:
-            return best_match['track']
-        else:
-            return None
+        return best_match['track']
 
     def addTrack(self, google_track):
         self.client.add_aa_track(google_track['nid'])
+
+class ChangeTracker(object):
+    def __init__(self, tag):
+        self.tag = tag
+        self.items = defaultdict(list)
+        self.item_count = 0
+
+    def add(self, rdio_track, google_track):
+        self.item_count += 1
+
+        item = {'rdio': rdio_track['name']}
+        if google_track:
+            item['google'] = google_track['title']
+
+        key = '{} [{}]'.format(rdio_track['album'], rdio_track['artist'])
+        self.items[key].append(item)
+
+    def summary(self, total):
+        lines = ['']
+
+        lines.append('----- {} {} ({:.2f}%) -----'.format(
+            self.item_count,
+            self.tag,
+            (float(self.item_count) / total) * 100,
+        ))
+
+        lines.append('')
+
+        for key, tracks in self.items.iteritems():
+            lines.append('+ {}'.format(key))
+
+            for track in tracks:
+                lines.append('|-> {}'.format(track['rdio']))
+                if 'google' in track:
+                    lines.append('|   +=> {}'.format(track['google']))
+                    lines.append('|')
+
+            lines.append('')
+
+        return lines
 
 if __name__ == '__main__':
     rdio = Rdio(os.getenv('RDIO_KEY'), os.getenv('RDIO_SECRET'))
     rdio_user = 'rraval'
     gmusic = GMusic(os.getenv('GOOGLE_USER'), os.getenv('GOOGLE_PASSWORD'))
 
-    existing_tracks = set()
+    existing_tracks = {}
     with progressbar(gmusic.genTracks(), label='Existing Google Music', show_pos=True) as bar:
         for track in bar:
             if 'nid' in track:
-                existing_tracks.add(track['nid'])
+                existing_tracks[track['nid']] = track
 
-    skip = added = notfound = 0
+    skip = ChangeTracker('Skipped')
+    added = ChangeTracker('Added')
+    notfound = ChangeTracker('Not Found')
+
     with progressbar(rdio.genTracks(rdio_user), label='Rdio -> Google Music', show_pos=True) as bar:
         for track in bar:
             match = gmusic.findTrack(track)
             if match is None:
-                notfound += 1
+                notfound.add(track, None)
             elif match['nid'] in existing_tracks:
-                skip += 1
+                skip.add(track, match)
             else:
                 gmusic.addTrack(match)
-                added += 1
+                added.add(track, match)
 
-    total = sum((added, skip, notfound))
-    print('{} Added ({:.2f}%)'.format(added, (float(added) / total) * 100))
-    print('{} Skipped ({:.2f}%)'.format(skip, (float(skip) / total) * 100))
-    print('{} Not Found ({:.2f}%)'.format(notfound, (float(notfound) / total) * 100))
+    total = sum((added.item_count, skip.item_count, notfound.item_count))
+    echo_via_pager('\n'.join(itertools.chain(
+        added.summary(total),
+        notfound.summary(total),
+        skip.summary(total),
+    )))
