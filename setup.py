@@ -13,4 +13,11 @@ setup(
         [console_scripts]
         rdio-gmusic=rdio_gmusic:main
     ''',
+
+    author='Ronuk Raval',
+    author_email='ronuk.raval@gmail.com',
+    description='Rdio to Google Music Exporter',
+    license='MIT',
+    keywords='rdio google-music',
+    url='https://github.com/rraval/rdio-gmusic',
 )
