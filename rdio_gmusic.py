@@ -200,8 +200,8 @@ def main(rdio_user, google_user):
 
     total = sum((added.item_count, skip.item_count, notfound.item_count))
     click.echo_via_pager('\n'.join(itertools.chain(
-        added.summary(total),
         notfound.summary(total),
+        added.summary(total),
         skip.summary(total),
     )))
 
