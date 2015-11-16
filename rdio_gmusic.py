@@ -93,7 +93,7 @@ class Rdio(object):
 class GMusic(object):
     def __init__(self, user, password):
         self.client = Mobileclient()
-        self.client.login(user, password)
+        self.client.login(user, password, Mobileclient.FROM_MAC_ADDRESS)
 
     def genTracks(self):
         for chunk in self.client.get_all_songs(incremental=True):
